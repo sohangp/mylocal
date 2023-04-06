@@ -143,14 +143,11 @@ CMD ["./main"]
 
 ---
 
-brew install --cask virtualbox
-VBoxManage --version
+brew install minikube
+minikube start --driver=docker
+minikube status
+minikube addons enable dashboard
+minikube dashboard
 
----
-
-https://www.okd.io/minishift/
-
-./minishift start --vm-driver=virtualbox
-
-./oc login -u system:admin
+kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep service-controller-token | awk '{print $1}')
 
