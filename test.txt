@@ -139,3 +139,18 @@ ENV REDIS_ADDR=localhost:6379
 
 # Run the Go app
 CMD ["./main"]
+
+
+---
+
+brew install --cask virtualbox
+VBoxManage --version
+
+---
+
+https://www.okd.io/minishift/
+
+./minishift start --vm-driver=virtualbox
+
+./oc login -u system:admin
+
