@@ -169,6 +169,20 @@ func main() {
 	r.Run()
 }
 
+---
+package controller
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// GET /health
+func HealthCheck(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, gin.H{"health": "Ok"})
+}
+
 ----
 brew install minikube
 minikube start --driver=docker
