@@ -143,6 +143,33 @@ CMD ["./main"]
 
 ---
 
+package main
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"order-service/app/controller"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+func main() {
+	r := gin.Default()
+
+	// Connect to database
+	//models.ConnectDatabase()
+
+	// Routes
+
+	// Admin Routes
+	r.GET("/health", controller.HealthCheck)
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Run the server
+	r.Run()
+}
+
+----
 brew install minikube
 minikube start --driver=docker
 minikube status
