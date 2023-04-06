@@ -143,45 +143,66 @@ CMD ["./main"]
 
 ---
 
-package main
-
-import (
-	"github.com/gin-gonic/gin"
-
-	"order-service/app/controller"
-
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-)
-
-func main() {
-	r := gin.Default()
-
-	// Connect to database
-	//models.ConnectDatabase()
-
-	// Routes
-
-	// Admin Routes
-	r.GET("/health", controller.HealthCheck)
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
-
-	// Run the server
-	r.Run()
-}
-
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: redis-namespace
 ---
-package controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  namespace: redis-namespace
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis
+        ports:
+        - containerPort: 6379
+          name: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: redis-namespace
+spec:
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: redis-ingress
+  namespace: redis-namespace
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: redis.local
+      http:
+        paths:
+          - path: /redis
+            pathType: Prefix
+            backend:
+              service:
+                name: redis-service
+                port:
+                  name: redis
 
-import (
-	"net/http"
-
-	"github.com/gin-gonic/gin"
-)
-
-// GET /health
-func HealthCheck(ctx *gin.Context) {
-	ctx.JSON(http.StatusOK, gin.H{"health": "Ok"})
-}
 
 ----
 brew install minikube
