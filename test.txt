@@ -1,145 +1,10 @@
-package main
+brew install minikube
+minikube start --driver=docker
+minikube status
+minikube addons enable dashboard
+minikube dashboard
 
-import (
-	"context"
-	"fmt"
-	"log"
-	"net/http"
-	"strconv"
-	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
-)
-
-func getUserWithdrawAmount(rdb *redis.Client, userID string) (int, error) {
-	// Get withdraw amount for user from Redis
-	val, err := rdb.Get(context.Background(), userID).Result()
-	if err != nil {
-		if err == redis.Nil {
-			return 0, fmt.Errorf("User with ID %s does not exist", userID)
-		}
-		return 0, fmt.Errorf("Failed to get data from Redis: %v", err)
-	}
-	withdrawAmount, err := strconv.Atoi(val)
-	if err != nil {
-		return 0, fmt.Errorf("Failed to convert withdraw amount to integer: %v", err)
-	}
-	return withdrawAmount, nil
-}
-
-func updateUserWithdrawAmount(rdb *redis.Client, userID string, withdrawAmount int) error {
-	// Get current withdraw amount for user from Redis
-	currWithdrawAmount, err := getUserWithdrawAmount(rdb, userID)
-	if err != nil {
-		return err
-	}
-
-	// Add new withdraw amount to current amount and set it in Redis with TTL of 1 hour
-	newWithdrawAmount := currWithdrawAmount + withdrawAmount
-	err = rdb.Set(context.Background(), userID, strconv.Itoa(newWithdrawAmount), time.Hour).Err()
-	if err != nil {
-		return fmt.Errorf("Failed to set data in Redis: %v", err)
-	}
-	fmt.Printf("Updated withdraw amount for UserID %s to %d\n", userID, newWithdrawAmount)
-	return nil
-}
-
-func main() {
-	// Connect to Redis
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-		DB:   0,
-	})
-
-	// Create Gin router
-	router := gin.Default()
-
-	// Define endpoint for getting user's withdraw amount
-	router.GET("/users/:id/withdraw", func(c *gin.Context) {
-		// Get user ID from URL parameter
-		userID := c.Param("id")
-
-		// Get withdraw amount for user from Redis
-		withdrawAmount, err := getUserWithdrawAmount(rdb, userID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Return withdraw amount in response
-		c.JSON(http.StatusOK, gin.H{"withdraw_amount": withdrawAmount})
-	})
-
-	// Define endpoint for putting user's withdraw amount
-	router.PUT("/users/:id/withdraw", func(c *gin.Context) {
-		// Get user ID from URL parameter
-		userID := c.Param("id")
-
-		// Get withdraw amount from request body
-		var req struct {
-			WithdrawAmount int `json:"withdraw_amount"`
-		}
-		if err := c.BindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-			return
-		}
-
-		// Update withdraw amount for user in Redis
-		err := updateUserWithdrawAmount(rdb, userID, req.WithdrawAmount)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Return success message in response
-		c.JSON(http.StatusOK, gin.H{"message": "Withdraw amount updated successfully"})
-	})
-
-	// Start server
-	if err := router.Run(":8080"); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-}
-
-
-----
-
-module myapp
-
-go 1.16
-
-require (
-	github.com/gin-gonic/gin v1.7.4
-	github.com/go-redis/redis/v8 v8.10.0
-)
-
-----
-
-# Use an official Golang runtime as a parent image
-FROM golang:latest
-
-# Set the working directory to /app
-WORKDIR /app
-
-# Copy the current directory contents into the container at /app
-COPY . /app
-
-# Install any needed dependencies
-RUN go mod download
-
-# Build the Go app
-RUN go build -o main .
-
-# Expose port 8080 to the outside world
-EXPOSE 8080
-
-# Define environment variables
-ENV REDIS_ADDR=localhost:6379
-
-# Run the Go app
-CMD ["./main"]
-
+kubectl apply -f k8s
 
 ---
 
@@ -149,32 +14,47 @@ metadata:
   name: redis-namespace
 
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: redis-namespace
+data:
+  REDIS_HOST: redis-service.redis-namespace.svc.cluster.local
+  REDIS_PORT: "6379"
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: redis
+  name: my-go-microservice
   namespace: redis-namespace
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: redis
+      app: my-go-microservice
   template:
     metadata:
       labels:
-        app: redis
+        app: my-go-microservice
     spec:
       containers:
-      - name: redis
-        image: redis:latest
+      - name: my-go-microservice
+        image: my-go-microservice:latest
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: redis-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: redis-config
+              key: REDIS_PORT
         ports:
-        - containerPort: 6379
-        volumeMounts:
-        - name: data
-          mountPath: /data
-      volumes:
-      - name: data
-        emptyDir: {}
+        - containerPort: 8080
 
 ---
 apiVersion: v1
@@ -183,44 +63,10 @@ metadata:
   name: redis-service
   namespace: redis-namespace
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
   - name: redis
     port: 6379
     targetPort: 6379
-    nodePort: 30000
   selector:
     app: redis
-
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: redis-ingress
-  namespace: redis-namespace
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
-  rules:
-  - host: redis.local
-    http:
-      paths:
-      - path: /redis
-        pathType: Prefix
-        backend:
-          service:
-            name: redis-service
-            port:
-              name: redis
-
-
-
-----
-brew install minikube
-minikube start --driver=docker
-minikube status
-minikube addons enable dashboard
-minikube dashboard
-
-kubectl -n kube-system describe secret $(kubectl -n kube-system get secret | grep service-controller-token | awk '{print $1}')
-
